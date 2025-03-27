@@ -1,6 +1,6 @@
-import './bootstrap';
-
-import Alpine from 'alpinejs';
+import "./bootstrap";
+import "../css/admin.css";
+import Alpine from "alpinejs";
 
 window.Alpine = Alpine;
 
