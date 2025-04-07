@@ -1,7 +1,8 @@
 <?php
 
 namespace App\Http\Controllers;
-
+use Illuminate\Support\Facades\Mail;
+use App\Mail\BookingEventInvoiceMail;
 use Illuminate\Http\Request;
 use App\Models\BookingEvent;
 use App\Models\BookingEventAsset;
@@ -13,6 +14,136 @@ use Carbon\Carbon;
 
 class BookingEventsController extends Controller
 {
+    public function fetchBookedTimes(Request $request)
+    {
+        $assetIds = $request->asset_ids;
+        $date = \DateTime::createFromFormat('d/m/Y', $request->date);
+
+        if (!$date || empty($assetIds)) {
+            return response()->json(['booked_times' => []]);
+        }
+
+        $targetDate = $date->format('Y-m-d');
+        $bookedTimes = [];
+
+        $assets = BookingEventAsset::with('bookingEvent.slots')
+            ->whereIn('fk_asset', $assetIds)
+            ->get();
+
+        foreach ($assets as $asset) {
+            foreach ($asset->bookingEvent->slots ?? [] as $slot) {
+                $slotFromDate = new \DateTime($slot->from_date);
+                $slotToDate = new \DateTime($slot->to_date);
+
+                while ($slotFromDate <= $slotToDate) {
+                    $dateKey = $slotFromDate->format('Y-m-d');
+
+                    if ($dateKey === $targetDate) {
+                        $bookedTimes[] = [
+                            'from' => date('H', strtotime($slot->from_time)), // e.g., "09"
+                            'to' => date('H', strtotime($slot->to_time))      // e.g., "11"
+                        ];
+                    }
+
+                    $slotFromDate->modify('+1 day');
+                }
+            }
+        }
+
+        return response()->json([
+            'booked_times' => $bookedTimes
+        ]);
+    }
+
+    public function fetchBookedDates(Request $request)
+    {
+        $assetIds = $request->asset_ids;
+        $bookedDates = [];
+
+        if (empty($assetIds)) {
+            return response()->json(['booked_dates' => []]);
+        }
+
+        $fullStart = strtotime('09:00');
+        $fullEnd = strtotime('18:00');
+        $buffer = 3600; // 1 hour buffer
+
+        $assets = BookingEventAsset::with('bookingEvent.slots')
+            ->whereIn('fk_asset', $assetIds)
+            ->get();
+
+        $assetDateTimeBlocks = [];
+
+        foreach ($assets as $asset) {
+            $assetId = $asset->fk_asset;
+            foreach ($asset->bookingEvent->slots ?? [] as $slot) {
+                $slotFromDate = new \DateTime($slot->from_date);
+                $slotToDate = $slot->to_date ? new \DateTime($slot->to_date) : clone $slotFromDate;
+
+
+                while ($slotFromDate <= $slotToDate) {
+                    $dateKey = $slotFromDate->format('Y-m-d');
+
+                    $fromTime = strtotime($slot->from_time);
+                    $toTime = strtotime($slot->to_time);
+
+                    // Skip slots with blank/invalid time blocks
+                    if ($fromTime === $toTime) {
+                        // Optional: log if needed
+                        // \Log::warning("Skipping blank slot on {$dateKey} for asset {$assetId}");
+                        $slotFromDate->modify('+1 day');
+                        continue;
+                    }
+
+                    $assetDateTimeBlocks[$assetId][$dateKey][] = [
+                        'start' => $fromTime,
+                        'end' => $toTime,
+                    ];
+
+                    $slotFromDate->modify('+1 day');
+                }
+            }
+        }
+
+        $finalBookedDates = [];
+
+        foreach ($assetDateTimeBlocks as $assetId => $dateBlocks) {
+            foreach ($dateBlocks as $date => $blocks) {
+                usort($blocks, fn($a, $b) => $a['start'] <=> $b['start']);
+
+                // Merge time blocks with 1-hour buffer
+                $merged = [];
+                foreach ($blocks as $block) {
+                    if (empty($merged)) {
+                        $merged[] = $block;
+                    } else {
+                        $last = &$merged[count($merged) - 1];
+                        if ($block['start'] <= $last['end'] + $buffer) {
+                            $last['end'] = max($last['end'], $block['end']);
+                        } else {
+                            $merged[] = $block;
+                        }
+                    }
+                }
+
+                // Check if any merged block covers full booking day
+                foreach ($merged as $block) {
+                    if ($block['start'] <= $fullStart && $block['end'] >= $fullEnd) {
+                        $finalBookedDates[] = (new \DateTime($date))->format('d/m/Y');
+                        break;
+                    }
+                }
+            }
+        }
+
+        return response()->json([
+            'booked_dates' => array_values(array_unique($finalBookedDates))
+        ]);
+    }
+
+
+
+
     public function checkAggregableAvailability(Request $request)
     {
         $fromDate = \DateTime::createFromFormat('d/m/Y', $request->from_date);
@@ -72,7 +203,7 @@ class BookingEventsController extends Controller
                 foreach ($overlappingDates as $date) {
                     // // Compare time blocks
                     if (
-                        strtotime($fromTime) <= strtotime($slot->to_time) &&
+                        strtotime($fromTime) < strtotime($slot->to_time) &&
                         strtotime($toTime) > strtotime($slot->from_time)
                     ) {
                         $conflicts[] = [
@@ -269,6 +400,40 @@ class BookingEventsController extends Controller
         }
 
         return redirect()->route('booking-events.index')->with('success', 'Booking event created successfully.');
+    }
+
+    public function sendInvoiceEmail($id)
+    {
+        // Get Booking Event and Customer
+        $bookingEvent = BookingEvent::with(['slots', 'customer'])->findOrFail($id);
+
+        // Prepare Asset Data
+        $selectedAssets = BookingEventAsset::where('booking_event_id', $id)
+            ->with('asset')
+            ->get()
+            ->mapWithKeys(function ($item) {
+                return [
+                    $item->fk_asset => [
+                        'asset_type' => $item->asset->asset_type ?? 'N/A',
+                        'qty' => $item->asset_qty,
+                        'price' => $item->asset_price,
+                        'fixed_hourly' => $item->asset->fixed_hourly,
+                        'total' => $item->total,
+                    ]
+                ];
+            })
+            ->toArray();
+
+        // Get Slots
+        $bookingSlots = BookingEventSlot::where('booking_event_id', $id)->get();
+
+        // Send Email
+        Mail::to($bookingEvent->customer->email)->send(
+            new BookingEventInvoiceMail($bookingEvent, $selectedAssets, $bookingSlots)
+        );
+
+        return redirect()->route('booking-events.index', $id)
+            ->with('success', 'Invoice has been sent to ' . $bookingEvent->customer->email);
     }
 
     public function view($id)

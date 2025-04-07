@@ -60,10 +60,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/calendar', [BookingEventsController::class, 'calendar'])->name('calendar');
         Route::get('/calendar-events', [BookingEventsController::class, 'fetchEvents'])->name('events');
         Route::post('/check-aggregable-availability', [BookingEventsController::class, 'checkAggregableAvailability'])->name('checkAggregableAvailability');
+        Route::post('/fetch-booked-dates', [BookingEventsController::class, 'fetchBookedDates'])->name('fetchBookedDates');
+        Route::post('/fetch-booked-times', [BookingEventsController::class, 'fetchBookedTimes'])->name('fetchBookedTimes');
         Route::get('/create', [BookingEventsController::class, 'create'])->name('create');
         Route::post('/store', [BookingEventsController::class, 'store'])->name('store');
         Route::get('/{booking_event}/edit', [BookingEventsController::class, 'edit'])->name('edit');
         Route::get('/{booking_event}/view', [BookingEventsController::class, 'view'])->name('view');
+        Route::get('/{booking_event}/email', [BookingEventsController::class, 'sendInvoiceEmail'])->name('email');
         Route::patch('/{booking_event}/toggle-status', [BookingEventsController::class, 'toggleStatus'])->name('toggle-status');
         Route::put('/{booking_event}', [BookingEventsController::class, 'update'])->name('update');
         Route::delete('/{booking_event}', [BookingEventsController::class, 'destroy'])->name('destroy');

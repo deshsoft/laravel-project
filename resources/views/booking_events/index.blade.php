@@ -41,6 +41,7 @@
                                 <tr>
                                     <th style="width: 15%;">Title</th>
                                     <th style="width: 15%;">Customer</th>
+                                    <th style="width: 15%;">Asset Types</th>
                                     <th style="width: 10%;">From Date</th>
 
                                     <th>From Time</th>
@@ -58,43 +59,48 @@
 
                             <tbody>
                                 @foreach($events as $event)
-                                        <tr>
-                                        <td>{{ $event->title }}</td>
-                                        <td>{{ $event->customer->company_name ?? 'N/A' }}</td>
+                                                                @php
+                                                                    $types = $event->assets->pluck('asset.asset_type')->filter()->unique()->implode(', ');
+                                                                @endphp
+                                                                <tr>
+                                                                    <td>{{ $event->title }}</td>
+                                                                    <td>{{ $event->customer->company_name ?? 'N/A' }}</td>
+                                                                    <td>{{ $types }}</td>
+                                                                    {{-- First Slot Details --}}
+                                                                    <td>
+                                                                        {{ $event->firstSlot?->from_date ? \Carbon\Carbon::parse($event->firstSlot->from_date)->format('d/m/Y') : '-' }}
+                                                                    </td>
+                                                                    <td>{{ $event->firstSlot?->from_time ?? '-' }}</td>
+                                                                    <td>{{ $event->firstSlot?->to_time ?? '-' }}</td>
+                                                                    <td>
+                                                                        {{ $event->firstSlot?->to_date ? \Carbon\Carbon::parse($event->firstSlot->to_date)->format('d/m/Y') : '-' }}
+                                                                    </td>
 
-                                        {{-- First Slot Details --}}
-                                        <td>
-                                            {{ $event->firstSlot?->from_date ? \Carbon\Carbon::parse($event->firstSlot->from_date)->format('d/m/Y') : '-' }}
-                                        </td>
-                                        <td>{{ $event->firstSlot?->from_time ?? '-' }}</td>
-                                        <td>{{ $event->firstSlot?->to_time ?? '-' }}</td>
-                                        <td>
-                                            {{ $event->firstSlot?->to_date ? \Carbon\Carbon::parse($event->firstSlot->to_date)->format('d/m/Y') : '-' }}
-                                        </td>
+                                                                    <td>€{{ number_format($event->total_price, 2, ',', '.') }}</td>
+                                                                    <td class="text-nowrap">€{{ number_format($event->discount, 2, ',', '.') }}
+                                                                        {{ $event->discount_percen_flat }}
+                                                                    </td>
+                                                                    <td>€{{ number_format($event->final_price, 2, ',', '.') }}</td>
+                                                                    <td>€{{ number_format($event->vat_amount, 2, ',', '.') }}</td>
+                                                                    <td>€{{ number_format($event->final_price_with_vat, 2, ',', '.') }}</td>
 
-                                        <td>€{{ number_format($event->total_price, 2, ',', '.') }}</td>
-                                        <td class="text-nowrap">€{{ number_format($event->discount, 2, ',', '.') }}
-                                            {{ $event->discount_percen_flat }}
-                                        </td>
-                                        <td>€{{ number_format($event->final_price, 2, ',', '.') }}</td>
-                                        <td>€{{ number_format($event->vat_amount, 2, ',', '.') }}</td>
-                                        <td>€{{ number_format($event->final_price_with_vat, 2, ',', '.') }}</td>
+                                                                    <td class="text-nowrap sticky-action-col bg-white">
+                                                                        <a href="{{ route('booking-events.edit', $event) }}"
+                                                                            class="btn btn-warning btn-sm me-1">Edit</a>
+                                                                        <a href="{{ route('booking-events.view', $event) }}"
+                                                                            class="btn btn-success btn-sm me-1">View</a>
+                                                                        <a href="{{ route('booking-events.email', $event) }}"
+                                                                            class="btn btn-info btn-sm me-1">Email</a>
+                                                                        <form action="{{ route('booking-events.destroy', $event) }}" method="POST"
+                                                                            class="d-inline">
+                                                                            @csrf
+                                                                            @method('DELETE')
+                                                                            <button type="submit" class="btn btn-danger btn-sm"
+                                                                                onclick="return confirm('Are you sure?')">Delete</button>
+                                                                        </form>
+                                                                    </td>
 
-                                        <td class="text-nowrap sticky-action-col bg-white">
-                                            <a href="{{ route('booking-events.edit', $event) }}"
-                                                class="btn btn-warning btn-sm me-1">Edit</a>
-                                            <a href="{{ route('booking-events.view', $event) }}"
-                                                class="btn btn-success btn-sm me-1">View</a>
-                                            <form action="{{ route('booking-events.destroy', $event) }}" method="POST"
-                                                class="d-inline">
-                                                @csrf
-                                                @method('DELETE')
-                                                <button type="submit" class="btn btn-danger btn-sm"
-                                                    onclick="return confirm('Are you sure?')">Delete</button>
-                                            </form>
-                                        </td>
-
-                                    </tr>
+                                                                </tr>
                                 @endforeach
 
                             </tbody>

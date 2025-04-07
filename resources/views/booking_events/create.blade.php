@@ -356,7 +356,21 @@
             </form>
         </div>
     </div>
+    <style>
+        .booked-date a {
+            background-color: #006A4E !important;
+            /* Bottle green */
+            color: white !important;
+            /* border-radius: 50% !important; */
+            /* optional */
+            font-weight: bold;
+        }
 
+        .disabled-checkbox {
+            pointer-events: none;
+            opacity: 0.4;
+        }
+    </style>
 </x-app-layout>
 
 <script>
@@ -449,6 +463,167 @@
                 }
             });
         }
+
+
+        function blockBookedDatesForAggregableAssets(slot) {
+            let selectedAssetIds = [];
+            $("#aggregable-assets-table tbody tr").each(function () {
+                let checkbox = $(this).find("input.toggle-qty");
+                if (checkbox.is(":checked")) {
+                    let nameAttr = checkbox.attr("name");
+                    let assetId = nameAttr.match(/\[(\d+)\]/)?.[1];
+                    if (assetId) {
+                        selectedAssetIds.push(assetId);
+                    }
+                }
+            });
+
+            if (selectedAssetIds.length === 0) return;
+
+            $.ajax({
+                url: "/booking-events/fetch-booked-dates",
+                method: "POST",
+                data: {
+                    asset_ids: selectedAssetIds,
+                    _token: $('meta[name="csrf-token"]').attr('content'),
+                },
+                success: function (response) {
+                    if (response.booked_dates && response.booked_dates.length > 0) {
+                        const bookedDates = response.booked_dates; // e.g., ["28/03/2025", "30/03/2025"]
+                        const dateFormat = "dd/mm/yy";
+
+                        // 🎨 Apply green color via custom class
+                        slot.find(".from-date, .to-date").datepicker("option", "beforeShowDay", function (date) {
+                            const d = $.datepicker.formatDate(dateFormat, date);
+                            if (bookedDates.includes(d)) {
+                                return [true, "booked-date", "Already booked"];
+                            }
+                            return [true, "", ""];
+                        });
+
+                        // 🚫 Prevent selecting booked date
+                        slot.find(".from-date, .to-date").off("change.blockCheck").on("change.blockCheck", function () {
+                            const selectedVal = $(this).val();
+                            if (bookedDates.includes(selectedVal)) {
+                                alert("This date is already booked. Please choose another.");
+                                $(this).val('');
+                            }
+                        });
+
+                    } else {
+                        // Reset calendar styles and validation
+                        slot.find(".from-date, .to-date").datepicker("option", "beforeShowDay", null);
+                        slot.find(".from-date, .to-date").off("change.blockCheck");
+                    }
+                }
+
+            });
+        }
+
+        function blockBookedTimeSlots(slot) {
+            const fromDate = slot.find(".from-date").val();
+            if (!fromDate) return;
+
+            let selectedAssetIds = [];
+            $("#aggregable-assets-table tbody tr").each(function () {
+                let checkbox = $(this).find("input.toggle-qty");
+                if (checkbox.is(":checked")) {
+                    let nameAttr = checkbox.attr("name");
+                    let assetId = nameAttr.match(/\[(\d+)\]/)?.[1];
+                    if (assetId) {
+                        selectedAssetIds.push(assetId);
+                    }
+                }
+            });
+
+            if (selectedAssetIds.length === 0) return;
+
+            $.ajax({
+                url: "/booking-events/fetch-booked-times",
+                method: "POST",
+                data: {
+                    date: fromDate,
+                    asset_ids: selectedAssetIds,
+                    _token: $('meta[name="csrf-token"]').attr('content'),
+                },
+                success: function (response) {
+                    const fromTime = slot.find(".from-time");
+                    const toTime = slot.find(".to-time");
+
+                    // // Enable all time options first
+                    fromTime.find("option").prop("disabled", false);
+                    toTime.find("option").prop("disabled", false);
+
+                    // Disable booked times
+                    if (response.booked_times && response.booked_times.length > 0) {
+                        response.booked_times.forEach(range => {
+                            let start = parseInt(range.from);
+                            let end = parseInt(range.to);
+
+                            for (let i = start; i < end; i++) {
+                                let val = (i < 10 ? '0' : '') + i + ':00';
+                                //console.log("Disabling:", val);
+                                fromTime.find(`option[value="${val}"]`).prop("disabled", true);
+                                toTime.find(`option[value="${val}"]`).prop("disabled", true);
+                            }
+                        });
+
+                        //Clear selected time if now disabled
+                        if (fromTime.find("option:selected").prop("disabled")) {
+                            //  fromTime.val('');
+                        }
+                        if (toTime.find("option:selected").prop("disabled")) {
+                            //  toTime.val('');
+                        }
+                    }
+                }
+
+            });
+        }
+
+        function blockBookedTimeSlotsInForm() {
+            const slots = $(".booking-slot");
+            if (slots.length < 2) return; // Nothing to compare
+
+            const lastSlot = slots.last();
+            const lastDate = lastSlot.find(".from-date").val();
+            const fromTime = lastSlot.find(".from-time");
+            const toTime = lastSlot.find(".to-time");
+
+            // Re-enable all time options before applying new disables
+            fromTime.find("option").prop("disabled", false);
+            toTime.find("option").prop("disabled", false);
+
+            // Loop through all rows except the last one
+            slots.slice(0, -1).each(function () {
+                const row = $(this);
+                const rowDate = row.find(".from-date").val();
+                const rowFrom = row.find(".from-time").val();
+                const rowTo = row.find(".to-time").val();
+
+                if (rowDate === lastDate && rowFrom && rowTo) {
+                    let startHour = parseInt(rowFrom.split(":")[0]);
+                    let endHour = parseInt(rowTo.split(":")[0]) + 1; // add 1-hour gap
+
+                    for (let i = startHour; i < endHour; i++) {
+                        let val = (i < 10 ? '0' : '') + i + ':00';
+                        fromTime.find(`option[value="${val}"]`).prop("disabled", true);
+                        toTime.find(`option[value="${val}"]`).prop("disabled", true);
+                    }
+                }
+            });
+
+            // Clear selected time if it was disabled
+            if (fromTime.find("option:selected").prop("disabled")) {
+                fromTime.val('');
+            }
+            if (toTime.find("option:selected").prop("disabled")) {
+                toTime.val('');
+            }
+        }
+
+
+
 
         function validateSlotOverlap(slot) {
             const fromDateStr = slot.find(".from-date").val();
@@ -571,14 +746,81 @@
         }
 
         function attachCalculationListeners(slot) {
+            slot.find(".from-date, .to-time, .from-time, .to-date").on("change", function () {
+                let hasCheckedAggregable = false;
+                $("#aggregable-assets-table tbody tr").each(function () {
+                    let checkbox = $(this).find("input.toggle-qty");
+                    if (checkbox.is(":checked")) {
+                        hasCheckedAggregable = true;
+                        return false; // break loop
+                    }
+                });
+
+                if (!hasCheckedAggregable) {
+                    alert("Please select at least one room before choosing a date.");
+                    $(this).val(''); // Clear date if already set
+                    //e.preventDefault();
+                    return false;
+                }
+
+                blockBookedTimeSlotsInForm();
+                blockBookedTimeSlots(slot);
+            });
             slot.find(".from-time, .to-time, .to-date, .from-date").on("change", function () {
                 const isValid = validateSlotOverlap(slot);
                 if (isValid) {
                     checkAggregableAvailability(slot);
                     calculateSlotPrice();
+                    lockAggregableCheckboxesIfSlotSelected();
                 }
             });
         }
+
+        // $(".from-date").on("change", function (e) {
+        //     let hasCheckedAggregable = false;
+
+        //     $("#aggregable-assets-table tbody tr").each(function () {
+        //         let checkbox = $(this).find("input.toggle-qty");
+        //         if (checkbox.is(":checked")) {
+        //             hasCheckedAggregable = true;
+        //             return false; // break loop
+        //         }
+        //     });
+
+        //     if (!hasCheckedAggregable) {
+        //         alert("Please select at least one room before choosing a date.");
+        //         $(this).val(''); // Clear date if already set
+        //         e.preventDefault();
+        //         return false;
+        //     }
+        // });
+
+        function lockAggregableCheckboxesIfSlotSelected() {
+            let slotHasDates = false;
+            $(".booking-slot").each(function () {
+                let fromDate = $(this).find(".from-date").val();
+                let fromTime = $(this).find(".from-time").val();
+                let toTime = $(this).find(".to-time").val();
+                let toDate = $(this).find(".to-date").val();
+
+                if (fromDate || fromTime || toTime || toDate) {
+                    slotHasDates = true;
+                    return false;
+                }
+            });
+
+            if (slotHasDates) {
+                $("#aggregable-assets-table input.toggle-qty").each(function () {
+                    //$(this).prop("disabled", true).addClass("disabled-checkbox");
+                    $(this).addClass("disabled-checkbox");
+                });
+            } else {
+                $("#aggregable-assets-table input.toggle-qty").each(function () {
+                    $(this).prop("disabled", false).removeClass("disabled-checkbox");
+                });
+            }
+        }
+
 
         function attachValidationListeners(slot) {
             let fromTime = slot.find(".from-time");
@@ -676,6 +918,9 @@
             newSlot.find(".remove-slot").on("click", removeSlot);
             slotsContainer.append(newSlot);
             updateSlotIndexes();
+            $(".booking-slot").each(function () {
+                blockBookedDatesForAggregableAssets($(this));
+            });
         });
 
         $(".remove-slot").on("click", removeSlot);
@@ -693,6 +938,10 @@
                 qtyInput.addClass("hidden").val("");
                 totalInput.addClass("hidden").val("");
             }
+
+            $(".booking-slot").each(function () {
+                blockBookedDatesForAggregableAssets($(this));
+            });
         });
 
         $('input[type=checkbox], input.qty-input, #discount, select[name="discount_percen_flat"]').on("input change", function () {
@@ -703,6 +952,7 @@
 
         $(".booking-slot").each(function () {
             const slot = $(this);
+            blockBookedDatesForAggregableAssets($(this));
             attachCalculationListeners(slot);
             attachValidationListeners(slot);
         });
@@ -712,6 +962,29 @@
             placeholder: 'Select an option',
             allowClear: true
         });
+
+        // Enforce at least one Aggregable Asset selected before form submit
+        $("form").on("submit", function (e) {
+            let hasCheckedAggregable = false;
+
+            $("#aggregable-assets-table tbody tr").each(function () {
+                let checkbox = $(this).find("input[type='checkbox']");
+                if (checkbox.is(":checked")) {
+                    hasCheckedAggregable = true;
+                    return false; // break loop
+                }
+            });
+
+            if (!hasCheckedAggregable) {
+                e.preventDefault();
+                alert("Please select at least one room (aggregable asset).");
+                return false;
+            }
+        });
+
+
+
+
     });
 
 </script>
